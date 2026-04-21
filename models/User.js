@@ -18,6 +18,23 @@ const RoutineSchema = new mongoose.Schema(
   { _id: false },
 );
 
+// ── NEW: store each recommendation with its reason ──────────────────────────
+const RecommendationItemSchema = new mongoose.Schema(
+  {
+    id: Number,
+    type: String, // "breathing" or null/undefined for pose
+    reason: mongoose.Schema.Types.Mixed, // { en, mr, hn }
+    name: mongoose.Schema.Types.Mixed,
+    image_url: String,
+    duration_seconds: Number,
+    repetitions: Number,
+    primary_benefits: mongoose.Schema.Types.Mixed,
+    difficulty_level: mongoose.Schema.Types.Mixed,
+    video: mongoose.Schema.Types.Mixed,
+  },
+  { _id: false },
+);
+
 const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
@@ -25,9 +42,11 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true },
     ageGroup: String,
     gender: String,
-
-    // NEW FIELD
     routine: RoutineSchema,
+
+    // ── NEW ──────────────────────────────────────────────────────────────────
+    savedPoseRecommendations: [RecommendationItemSchema],
+    savedBreathingRecommendations: [RecommendationItemSchema],
   },
   { timestamps: true },
 );

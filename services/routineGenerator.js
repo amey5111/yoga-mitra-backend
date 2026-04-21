@@ -111,4 +111,50 @@ async function generateRoutine(poseIds, breathingIds, duration) {
   return buildRoutine(poses, breathing, duration);
 }
 
-module.exports = { generateRoutine };
+// ... all existing code unchanged ...
+
+async function arrangeRoutine(poseIds, breathingIds) {
+  const poses = await YogaPose.find({ id: { $in: poseIds } }).lean();
+  const breathing = await BreathingTechnique.find({
+    id: { $in: breathingIds },
+  }).lean();
+
+  const warmup = [],
+    mobility = [],
+    main = [],
+    cooldown = [];
+
+  poses.forEach((p) => {
+    const type = classifyPose(p);
+    if (type === "warmup") warmup.push(p);
+    else if (type === "mobility") mobility.push(p);
+    else if (type === "main") main.push(p);
+    else cooldown.push(p);
+  });
+
+  const warmBreath = breathing.slice(0, 1);
+  const relaxBreath = breathing.slice(1);
+  const sequence = [];
+
+  if (warmBreath[0]) sequence.push({ type: "breathing", item: warmBreath[0] });
+  warmup.forEach((p) => sequence.push({ type: "pose", item: p }));
+  mobility.forEach((p) => sequence.push({ type: "pose", item: p }));
+  main.forEach((p) => sequence.push({ type: "pose", item: p }));
+  cooldown.forEach((p) => sequence.push({ type: "pose", item: p }));
+  if (relaxBreath[0])
+    sequence.push({ type: "breathing", item: relaxBreath[0] });
+
+  let total = 0;
+  const routine = sequence.map((step, i) => {
+    const duration =
+      step.type === "pose"
+        ? poseDuration(step.item)
+        : breathingDuration(step.item);
+    total += duration;
+    return { order: i + 1, type: step.type, id: step.item.id, duration };
+  });
+
+  return { total_duration: total, routine };
+}
+
+module.exports = { generateRoutine, arrangeRoutine };
