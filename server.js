@@ -2,6 +2,7 @@ const express = require("express");
 const dotenv = require("dotenv");
 const cors = require("cors");
 const connectDB = require("./config/db");
+const poseTrackingRoutes = require("./routes/poseTrackingRoutes");
 
 dotenv.config();
 connectDB();
@@ -18,6 +19,7 @@ app.use("/api/breathing", require("./routes/breathingRoutes"));
 app.use("/api/routine", require("./routes/routineRoutes"));
 app.use("/uploads", express.static("uploads"));
 app.use("/api/routine", require("./routes/routineRoutes"));
+app.use("/api/pose-tracking", poseTrackingRoutes);
 
 app.get("/", (req, res) => {
   res.send("Yoga Mitra Backend Running");
