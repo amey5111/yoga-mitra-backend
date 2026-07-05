@@ -26,6 +26,8 @@ router.get("/user/:userId", async (req, res) => {
       routine: user.routine ?? null,
       savedPoseRecommendations: user.savedPoseRecommendations ?? [],
       savedBreathingRecommendations: user.savedBreathingRecommendations ?? [],
+      healthProfile: user.healthProfile ?? null,
+      medicalReport: user.medicalReport ?? null,
     });
   } catch (err) {
     return res.status(500).json({ message: "Failed to fetch routine" });

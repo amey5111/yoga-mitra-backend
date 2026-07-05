@@ -10,7 +10,7 @@ connectDB();
 const app = express();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "25mb" }));
 
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/recommendations", require("./routes/recommendationRoutes"));
@@ -20,6 +20,10 @@ app.use("/api/routine", require("./routes/routineRoutes"));
 app.use("/uploads", express.static("uploads"));
 app.use("/api/routine", require("./routes/routineRoutes"));
 app.use("/api/pose-tracking", poseTrackingRoutes);
+app.use("/api/health-report", require("./routes/healthReportRoutes"));
+app.use("/api/chat", require("./routes/chatRoutes"));
+app.use("/api/diet", require("./routes/dietRoutes"));
+app.use("/api/user", require("./routes/userRoutes"));
 
 app.get("/", (req, res) => {
   res.send("Yoga Mitra Backend Running");

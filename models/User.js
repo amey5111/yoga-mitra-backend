@@ -35,6 +35,33 @@ const RecommendationItemSchema = new mongoose.Schema(
   { _id: false },
 );
 
+// ── Persisted health profile (height/weight/conditions/activity) ────────────
+const HealthProfileSchema = new mongoose.Schema(
+  {
+    height: Number,
+    weight: Number,
+    activityLevel: String,
+    medicalConditions: [String],
+    focusBodyParts: [String],
+    goalTags: [String],
+    routineDuration: Number,
+  },
+  { _id: false },
+);
+
+// ── AI-analyzed medical report ──────────────────────────────────────────────
+const MedicalReportSchema = new mongoose.Schema(
+  {
+    knownConditions: [String],
+    otherConditions: [String],
+    summary: String,
+    cautions: String,
+    fileName: String,
+    uploadedAt: Date,
+  },
+  { _id: false },
+);
+
 const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
@@ -47,6 +74,10 @@ const userSchema = new mongoose.Schema(
     // ── NEW ──────────────────────────────────────────────────────────────────
     savedPoseRecommendations: [RecommendationItemSchema],
     savedBreathingRecommendations: [RecommendationItemSchema],
+
+    // ── Persisted health + medical report ─────────────────────────────────────
+    healthProfile: HealthProfileSchema,
+    medicalReport: MedicalReportSchema,
   },
   { timestamps: true },
 );
