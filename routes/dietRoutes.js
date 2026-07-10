@@ -89,4 +89,28 @@ Return ONLY valid JSON with exactly these keys:
   }
 });
 
+/* Short, targeted food advice for a specific complaint (voice-friendly) */
+router.post("/food-for", async (req, res) => {
+  try {
+    const { concern = "", language = "en" } = req.body || {};
+    const langName = LANG_NAMES[language] || "English";
+    if (!concern.trim()) {
+      return res.status(400).json({ message: "No concern provided" });
+    }
+
+    const prompt = `A user says: "${concern}". As an Indian nutritionist, give SHORT, practical food advice for this.
+
+Reply in ${langName}. Maximum 3 short sentences. Say: 2-3 foods that help, and 1-2 foods to avoid. Common Indian foods. No long explanation, no headings, no preamble — just the direct advice a friend would say aloud.`;
+
+    const reply = await chatCompletion([{ role: "user", content: prompt }], {
+      temperature: 0.4,
+    });
+
+    return res.json({ advice: (reply || "").trim() });
+  } catch (err) {
+    console.error("FOOD-FOR ERROR:", err.message);
+    return res.status(500).json({ message: "Could not get food advice" });
+  }
+});
+
 module.exports = router;
