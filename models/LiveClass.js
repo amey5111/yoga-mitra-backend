@@ -39,6 +39,14 @@ const LiveClassSchema = new mongoose.Schema(
       default: "scheduled",
     },
 
+    // public = shown in the Live feed; private = join by code only.
+    visibility: {
+      type: String,
+      enum: ["public", "private"],
+      default: "public",
+    },
+    joinCode: { type: String, default: "", index: true },
+
     scheduledAt: { type: Date, default: null },
     startedAt: { type: Date, default: null },
     endedAt: { type: Date, default: null },

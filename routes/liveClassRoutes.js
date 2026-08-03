@@ -14,6 +14,15 @@ function makeChannelName() {
   return `ym-${a}-${b}`;
 }
 
+function makeJoinCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let s = "";
+  for (let i = 0; i < 5; i++) {
+    s += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return `YM-${s}`;
+}
+
 /* -------------------------------------------------------------
    Create a class. Instructor can schedule it or go live now.
    body: { title, description, instructorId, instructorName,
@@ -28,6 +37,7 @@ router.post("/", async (req, res) => {
       instructorName = "Instructor",
       scheduledAt = null,
       goLiveNow = false,
+      visibility = "public",
     } = req.body || {};
 
     if (!title || !instructorId) {
@@ -45,6 +55,8 @@ router.post("/", async (req, res) => {
       status: goLiveNow ? "live" : "scheduled",
       scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
       startedAt: goLiveNow ? new Date() : null,
+      visibility: visibility === "private" ? "private" : "public",
+      joinCode: makeJoinCode(),
     });
 
     res.status(201).json({ liveClass });
@@ -60,9 +72,17 @@ router.post("/", async (req, res) => {
 router.get("/feed", async (_req, res) => {
   try {
     const [live, upcoming, recorded] = await Promise.all([
-      LiveClass.find({ status: "live" }).sort({ startedAt: -1 }).lean(),
-      LiveClass.find({ status: "scheduled" }).sort({ scheduledAt: 1 }).lean(),
-      LiveClass.find({ status: "ended", recordingUrl: { $ne: "" } })
+      LiveClass.find({ status: "live", visibility: "public" })
+        .sort({ startedAt: -1 })
+        .lean(),
+      LiveClass.find({ status: "scheduled", visibility: "public" })
+        .sort({ scheduledAt: 1 })
+        .lean(),
+      LiveClass.find({
+        status: "ended",
+        visibility: "public",
+        recordingUrl: { $ne: "" },
+      })
         .sort({ endedAt: -1 })
         .lean(),
     ]);
@@ -70,6 +90,19 @@ router.get("/feed", async (_req, res) => {
   } catch (err) {
     console.error("LIVE FEED ERROR:", err.message);
     res.status(500).json({ message: "Could not load classes" });
+  }
+});
+
+/* Join a private (or any) class by its code. */
+router.get("/by-code/:code", async (req, res) => {
+  try {
+    const c = await LiveClass.findOne({
+      joinCode: req.params.code.trim().toUpperCase(),
+    }).lean();
+    if (!c) return res.status(404).json({ message: "No class with that code" });
+    res.json({ liveClass: c });
+  } catch (err) {
+    res.status(400).json({ message: "Bad code" });
   }
 });
 
