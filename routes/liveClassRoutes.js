@@ -120,6 +120,7 @@ router.get("/instructor/:instructorId/stats", async (req, res) => {
     let sessionsTaken = 0;
     let liveNow = 0;
     let upcoming = 0;
+    const uniq = new Set();
     for (const c of classes) {
       if (c.status === "ended") sessionsTaken++;
       else if (c.status === "live") liveNow++;
@@ -132,6 +133,9 @@ router.get("/instructor/:instructorId/stats", async (req, res) => {
       }
       totalStudents += c.attendeesCount || 0;
       if (c.recordingUrl) recordings++;
+      (c.participants || []).forEach((p) => {
+        if (p.userId) uniq.add(p.userId);
+      });
     }
     res.json({
       totalClasses: classes.length,
@@ -140,6 +144,7 @@ router.get("/instructor/:instructorId/stats", async (req, res) => {
       upcoming,
       totalMinutes: Math.round(totalMinutes),
       totalStudents,
+      uniqueStudents: uniq.size,
       recordings,
     });
   } catch (err) {
@@ -527,5 +532,33 @@ function extractRecordingUrl(result) {
     return "";
   }
 }
+
+/* Attendee rates a class (1-5 stars). One rating per user. */
+router.post("/:id/rate", async (req, res) => {
+  try {
+    const { userId = "", stars = 0 } = req.body || {};
+    const s = Math.max(1, Math.min(5, Math.round(stars)));
+    const c = await LiveClass.findById(req.params.id);
+    if (!c) return res.status(404).json({ message: "Not found" });
+    const existing = c.ratings.find((r) => r.userId === userId);
+    if (existing) existing.stars = s;
+    else c.ratings.push({ userId, stars: s });
+    await c.save();
+    res.json({ ok: true, count: c.ratings.length });
+  } catch (err) {
+    res.status(400).json({ message: "Could not rate" });
+  }
+});
+
+/* Cancel / delete a class (instructor). */
+router.delete("/:id", async (req, res) => {
+  try {
+    const c = await LiveClass.findByIdAndDelete(req.params.id);
+    if (!c) return res.status(404).json({ message: "Not found" });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ message: "Bad id" });
+  }
+});
 
 module.exports = router;

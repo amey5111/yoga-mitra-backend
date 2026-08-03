@@ -47,6 +47,12 @@ const LiveClassSchema = new mongoose.Schema(
     },
     joinCode: { type: String, default: "", index: true },
 
+    // Attendee star ratings (1-5).
+    ratings: {
+      type: [{ userId: String, stars: Number }],
+      default: [],
+    },
+
     scheduledAt: { type: Date, default: null },
     startedAt: { type: Date, default: null },
     endedAt: { type: Date, default: null },
