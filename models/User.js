@@ -73,6 +73,11 @@ const userSchema = new mongoose.Schema(
     // "user" (default) or "instructor" — drives a completely separate experience
     role: { type: String, enum: ["user", "instructor"], default: "user" },
 
+    // Instructor public profile
+    bio: { type: String, default: "" },
+    specialty: { type: String, default: "" },
+    photo: { type: String, default: "" }, // base64 data URL
+
     routine: RoutineSchema,
 
     // ── NEW ──────────────────────────────────────────────────────────────────
