@@ -25,6 +25,7 @@ app.use("/api/chat", require("./routes/chatRoutes"));
 app.use("/api/diet", require("./routes/dietRoutes"));
 app.use("/api/user", require("./routes/userRoutes"));
 app.use("/api/session", require("./routes/sessionFeedbackRoutes"));
+app.use("/api/live", require("./routes/liveClassRoutes"));
 
 app.get("/", (req, res) => {
   res.send("Yoga Mitra Backend Running");

@@ -4,7 +4,7 @@ const jwt = require("jsonwebtoken");
 
 exports.register = async (req, res) => {
   try {
-    const { name, email, password, ageGroup, gender } = req.body;
+    const { name, email, password, ageGroup, gender, role } = req.body;
 
     if (!name || !email || !password)
       return res.status(400).json({ message: "All fields required" });
@@ -15,6 +15,7 @@ exports.register = async (req, res) => {
       return res.status(400).json({ message: "Email already exists" });
 
     const hashed = await bcrypt.hash(password, 10);
+    const safeRole = role === "instructor" ? "instructor" : "user";
 
     const user = await User.create({
       name,
@@ -22,6 +23,7 @@ exports.register = async (req, res) => {
       password: hashed,
       ageGroup,
       gender,
+      role: safeRole,
     });
 
     res.status(201).json({
@@ -31,6 +33,7 @@ exports.register = async (req, res) => {
       email: user.email,
       ageGroup: ageGroup,
       gender: gender,
+      role: user.role,
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -60,6 +63,7 @@ exports.login = async (req, res) => {
       email: user.email,
       ageGroup: user.ageGroup,
       gender: user.gender,
+      role: user.role || "user",
     });
   } catch (err) {
     res.status(500).json({ message: err.message });

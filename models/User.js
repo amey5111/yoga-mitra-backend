@@ -69,6 +69,10 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true },
     ageGroup: String,
     gender: String,
+
+    // "user" (default) or "instructor" — drives a completely separate experience
+    role: { type: String, enum: ["user", "instructor"], default: "user" },
+
     routine: RoutineSchema,
 
     // ── NEW ──────────────────────────────────────────────────────────────────
