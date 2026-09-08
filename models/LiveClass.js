@@ -68,13 +68,22 @@ const LiveClassSchema = new mongoose.Schema(
     questions: { type: [QuestionSchema], default: [] },
     raisedHands: { type: [RaisedHandSchema], default: [] },
 
+    // The instructor's Agora uid, published when they go live. Viewers need it
+    // to tell the instructor's video stream apart from a student who has been
+    // brought on stage — the order streams arrive in says nothing about who is
+    // who.
+    hostUid: { type: Number, default: 0 },
+
     // Who is currently in the room (for the Meet-style participants panel).
+    // agoraUid ties a person to the video tile their stream renders into, so
+    // tiles can be labelled with a name instead of a number.
     participants: {
       type: [
         {
           userId: String,
           userName: { type: String, default: "Guest" },
           onStage: { type: Boolean, default: false },
+          agoraUid: { type: Number, default: 0 },
         },
       ],
       default: [],

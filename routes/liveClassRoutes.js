@@ -1,10 +1,15 @@
 const express = require("express");
 const LiveClass = require("../models/LiveClass");
 const LiveAttendance = require("../models/LiveAttendance");
+const LessonMaterial = require("../models/LessonMaterial");
 const agora = require("../utils/agoraClient");
 const calendar = require("../services/calendarService");
 
 const router = express.Router();
+
+/* The lesson plan for a class (notes, instructions, media) lives in its own
+   router. Mounted first so the prefix is matched before the "/:id" routes. */
+router.use("/:id/materials", require("./lessonMaterialRoutes"));
 
 // Fixed uid used by the cloud-recording bot (must not collide with clients).
 const RECORD_UID = 999998;
@@ -300,7 +305,7 @@ router.get("/:id/state", async (req, res) => {
   try {
     const c = await LiveClass.findById(req.params.id)
       .select(
-        "status speakers raisedHands questions recording attendeesCount participants",
+        "status speakers raisedHands questions recording attendeesCount participants hostUid instructorId instructorName",
       )
       .lean();
     if (!c) return res.status(404).json({ message: "Not found" });
@@ -310,6 +315,10 @@ router.get("/:id/state", async (req, res) => {
       raisedHands: c.raisedHands || [],
       questions: c.questions || [],
       participants: c.participants || [],
+      // Lets each client label video tiles and pick out the instructor's.
+      hostUid: c.hostUid || 0,
+      instructorId: c.instructorId || "",
+      instructorName: c.instructorName || "Instructor",
       isRecording: !!(c.recording && c.recording.isRecording),
       attendeesCount: c.attendeesCount || 0,
     });
@@ -391,14 +400,18 @@ router.patch("/:id/schedule", async (req, res) => {
   }
 });
 
-/* Instructor: go live */
+/* Instructor: go live. Publishes their Agora uid so viewers know which
+   incoming video stream is the instructor's. */
 router.post("/:id/go-live", async (req, res) => {
   try {
-    const c = await LiveClass.findByIdAndUpdate(
-      req.params.id,
-      { status: "live", startedAt: new Date() },
-      { new: true },
-    );
+    const update = { status: "live", startedAt: new Date() };
+    const agoraUid = Number(req.body?.agoraUid);
+    if (Number.isFinite(agoraUid) && agoraUid > 0) {
+      update.hostUid = Math.round(agoraUid);
+    }
+    const c = await LiveClass.findByIdAndUpdate(req.params.id, update, {
+      new: true,
+    });
     if (!c) return res.status(404).json({ message: "Not found" });
     res.json({ liveClass: c });
   } catch (err) {
@@ -438,15 +451,38 @@ router.post("/:id/end", async (req, res) => {
   }
 });
 
-/* Audience join: track the participant (for the people panel) + count. */
+/* Audience join: track the participant (for the people panel) + count.
+   agoraUid maps this person to the video tile their stream renders into. */
 router.post("/:id/join", async (req, res) => {
   try {
-    const { userId = "", userName = "Guest", onStage = false } = req.body || {};
+    const {
+      userId = "",
+      userName = "Guest",
+      onStage = false,
+      agoraUid,
+    } = req.body || {};
     const c = await LiveClass.findById(req.params.id);
     if (!c) return res.status(404).json({ message: "Not found" });
-    if (userId && !c.participants.some((p) => p.userId === userId)) {
-      c.participants.push({ userId, userName, onStage });
-      c.attendeesCount += 1;
+
+    const uid = Number(agoraUid);
+    const cleanUid = Number.isFinite(uid) && uid > 0 ? Math.round(uid) : 0;
+
+    if (userId) {
+      const existing = c.participants.find((p) => p.userId === userId);
+      if (existing) {
+        // A rejoin (dropped call, app restart) gets a fresh Agora uid; keep the
+        // mapping current instead of leaving tiles labelled with a stale name.
+        if (cleanUid) existing.agoraUid = cleanUid;
+        existing.userName = userName;
+      } else {
+        c.participants.push({
+          userId,
+          userName,
+          onStage,
+          agoraUid: cleanUid,
+        });
+        c.attendeesCount += 1;
+      }
     }
     await c.save();
     res.json({ liveClass: c });
@@ -566,8 +602,15 @@ router.post("/:id/approve-hand", async (req, res) => {
     const hand = c.raisedHands.find((h) => h.userId === userId);
     if (hand) hand.approved = true;
     if (!c.speakers.includes(userId)) c.speakers.push(userId);
+    // Keep the people panel in step with who is actually on camera.
+    const participant = c.participants.find((p) => p.userId === userId);
+    if (participant) participant.onStage = true;
     await c.save();
-    res.json({ speakers: c.speakers, raisedHands: c.raisedHands });
+    res.json({
+      speakers: c.speakers,
+      raisedHands: c.raisedHands,
+      participants: c.participants,
+    });
   } catch (err) {
     res.status(400).json({ message: "Bad id" });
   }
@@ -583,8 +626,14 @@ router.post("/:id/lower-hand", async (req, res) => {
 
     c.speakers = c.speakers.filter((s) => s !== userId);
     c.raisedHands = c.raisedHands.filter((h) => h.userId !== userId);
+    const participant = c.participants.find((p) => p.userId === userId);
+    if (participant) participant.onStage = false;
     await c.save();
-    res.json({ speakers: c.speakers, raisedHands: c.raisedHands });
+    res.json({
+      speakers: c.speakers,
+      raisedHands: c.raisedHands,
+      participants: c.participants,
+    });
   } catch (err) {
     res.status(400).json({ message: "Bad id" });
   }
@@ -712,6 +761,8 @@ router.delete("/:id", async (req, res) => {
   try {
     const c = await LiveClass.findByIdAndDelete(req.params.id);
     if (!c) return res.status(404).json({ message: "Not found" });
+    // The lesson plan belongs to the class; do not leave it orphaned.
+    await LessonMaterial.deleteMany({ classId: String(req.params.id) });
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ message: "Bad id" });
