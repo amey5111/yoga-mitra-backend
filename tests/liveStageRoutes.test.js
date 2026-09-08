@@ -304,3 +304,100 @@ test("stage actions need a user and a real class", async () => {
     .send({ userId: "s1" })
     .expect(404);
 });
+
+/* ── stage mode ───────────────────────────────────────────────────────────── */
+
+test("a class defaults to webinar mode", async () => {
+  const res = await request(app)
+    .post("/api/live")
+    .send({ title: "Talk", instructorId: TEACHER, goLiveNow: true })
+    .expect(201);
+  assert.equal(res.body.liveClass.stageMode, "webinar");
+});
+
+test("a group class puts everyone on camera", async () => {
+  const res = await request(app)
+    .post("/api/live")
+    .send({
+      title: "Practice together",
+      instructorId: TEACHER,
+      goLiveNow: true,
+      stageMode: "group",
+    })
+    .expect(201);
+  assert.equal(res.body.liveClass.stageMode, "group");
+
+  // A plain student asking to watch is still granted a publishing role.
+  const token = await request(app)
+    .get(`/api/live/${res.body.liveClass._id}/token`)
+    .query({ uid: 1001, role: "audience", viewerId: "student-1" })
+    .expect(200);
+
+  assert.equal(token.body.role, "host");
+  assert.equal(token.body.stageMode, "group");
+});
+
+test("an unknown stage mode falls back to webinar", async () => {
+  const res = await request(app)
+    .post("/api/live")
+    .send({
+      title: "Odd",
+      instructorId: TEACHER,
+      goLiveNow: true,
+      stageMode: "freeforall",
+    })
+    .expect(201);
+  assert.equal(res.body.liveClass.stageMode, "webinar");
+});
+
+test("in a webinar a student cannot talk their way into publishing", async () => {
+  const c = await makeClass({ status: "live", stageMode: "webinar" });
+
+  const sneaky = await request(app)
+    .get(`/api/live/${c._id}/token`)
+    .query({ uid: 1001, role: "host", viewerId: "student-1" })
+    .expect(200);
+  assert.equal(sneaky.body.role, "audience");
+
+  // The instructor of the class does get a broadcaster token.
+  const host = await request(app)
+    .get(`/api/live/${c._id}/token`)
+    .query({ uid: 4242, role: "host", viewerId: TEACHER })
+    .expect(200);
+  assert.equal(host.body.role, "host");
+});
+
+test("a student brought on stage is granted a publishing role", async () => {
+  const c = await makeClass({ status: "live", stageMode: "webinar" });
+  await request(app)
+    .post(`/api/live/${c._id}/join`)
+    .send({ userId: "student-1", userName: "Ravi", agoraUid: 1001 })
+    .expect(200);
+  await request(app)
+    .post(`/api/live/${c._id}/raise-hand`)
+    .send({ userId: "student-1" })
+    .expect(200);
+
+  const before = await request(app)
+    .get(`/api/live/${c._id}/token`)
+    .query({ uid: 1001, role: "host", viewerId: "student-1" })
+    .expect(200);
+  assert.equal(before.body.role, "audience");
+
+  await request(app)
+    .post(`/api/live/${c._id}/approve-hand`)
+    .send({ userId: "student-1" })
+    .expect(200);
+
+  const after = await request(app)
+    .get(`/api/live/${c._id}/token`)
+    .query({ uid: 1001, role: "host", viewerId: "student-1" })
+    .expect(200);
+  assert.equal(after.body.role, "host");
+});
+
+test("state reports the stage mode so clients know how to join", async () => {
+  const c = await makeClass({ status: "live", stageMode: "group" });
+  const res = await request(app).get(`/api/live/${c._id}/state`).expect(200);
+  assert.equal(res.body.stageMode, "group");
+});

@@ -45,6 +45,7 @@ router.post("/", async (req, res) => {
       durationMinutes,
       goLiveNow = false,
       visibility = "public",
+      stageMode = "webinar",
     } = req.body || {};
 
     if (!title || !instructorId) {
@@ -79,6 +80,7 @@ router.post("/", async (req, res) => {
       durationMinutes: calendar.normalizeDuration(durationMinutes),
       startedAt: goLiveNow ? new Date() : null,
       visibility: visibility === "private" ? "private" : "public",
+      stageMode: stageMode === "group" ? "group" : "webinar",
       joinCode: makeJoinCode(),
     });
 
@@ -305,7 +307,7 @@ router.get("/:id/state", async (req, res) => {
   try {
     const c = await LiveClass.findById(req.params.id)
       .select(
-        "status speakers raisedHands questions recording attendeesCount participants hostUid instructorId instructorName",
+        "status speakers raisedHands questions recording attendeesCount participants hostUid instructorId instructorName stageMode",
       )
       .lean();
     if (!c) return res.status(404).json({ message: "Not found" });
@@ -319,6 +321,7 @@ router.get("/:id/state", async (req, res) => {
       hostUid: c.hostUid || 0,
       instructorId: c.instructorId || "",
       instructorName: c.instructorName || "Instructor",
+      stageMode: c.stageMode || "webinar",
       isRecording: !!(c.recording && c.recording.isRecording),
       attendeesCount: c.attendeesCount || 0,
     });
@@ -338,7 +341,23 @@ router.get("/:id/token", async (req, res) => {
     if (!c) return res.status(404).json({ message: "Not found" });
 
     const uid = Number(req.query.uid || 0);
-    const role = req.query.role === "host" ? "host" : "audience";
+
+    // The room decides the role, not the caller. In a group class everyone is
+    // on camera, so every joiner is granted a broadcaster token; in a webinar
+    // only the instructor and the students they have brought on stage are.
+    const asked = req.query.role === "host" ? "host" : "audience";
+    const viewerId = String(req.query.viewerId || "").trim();
+    const isInstructor = viewerId && viewerId === String(c.instructorId);
+    const isSpeaker = viewerId && (c.speakers || []).includes(viewerId);
+
+    let role = asked;
+    if (c.stageMode === "group") {
+      role = "host";
+    } else if (viewerId && asked === "host" && !isInstructor && !isSpeaker) {
+      // Asked to publish in a webinar without being on stage: watch instead.
+      role = "audience";
+    }
+
     let token = "";
     try {
       token = agora.buildRtcToken(c.channelName, uid, role);
@@ -351,6 +370,9 @@ router.get("/:id/token", async (req, res) => {
       channelName: c.channelName,
       uid,
       role,
+      stageMode: c.stageMode || "webinar",
+      hostUid: c.hostUid || 0,
+      instructorId: c.instructorId || "",
       token,
       tokenConfigured: agora.isTokenConfigured(),
     });

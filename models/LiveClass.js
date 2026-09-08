@@ -45,6 +45,19 @@ const LiveClassSchema = new mongoose.Schema(
       enum: ["public", "private"],
       default: "public",
     },
+
+    // How the room is run.
+    //   webinar - the instructor broadcasts; students watch and raise a hand
+    //             to be brought on camera one at a time.
+    //   group   - everyone is on camera from the moment they join, so the
+    //             instructor can watch the whole class practise at once.
+    // This decides the Agora role each joiner is granted, so it is enforced
+    // when the token is issued rather than trusted from the client.
+    stageMode: {
+      type: String,
+      enum: ["webinar", "group"],
+      default: "webinar",
+    },
     joinCode: { type: String, default: "", index: true },
 
     // Attendee star ratings (1-5).
