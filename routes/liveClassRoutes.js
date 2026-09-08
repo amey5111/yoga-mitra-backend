@@ -2,6 +2,7 @@ const express = require("express");
 const LiveClass = require("../models/LiveClass");
 const LiveAttendance = require("../models/LiveAttendance");
 const agora = require("../utils/agoraClient");
+const calendar = require("../services/calendarService");
 
 const router = express.Router();
 
@@ -26,7 +27,7 @@ function makeJoinCode() {
 /* -------------------------------------------------------------
    Create a class. Instructor can schedule it or go live now.
    body: { title, description, instructorId, instructorName,
-           scheduledAt?, goLiveNow? }
+           scheduledAt?, durationMinutes?, goLiveNow? }
 ------------------------------------------------------------- */
 router.post("/", async (req, res) => {
   try {
@@ -36,6 +37,7 @@ router.post("/", async (req, res) => {
       instructorId,
       instructorName = "Instructor",
       scheduledAt = null,
+      durationMinutes,
       goLiveNow = false,
       visibility = "public",
     } = req.body || {};
@@ -46,6 +48,21 @@ router.post("/", async (req, res) => {
         .json({ message: "title and instructorId are required" });
     }
 
+    // An unparseable date used to reach Mongoose and surface as a 500; reject
+    // it here so the client gets a message it can act on.
+    let startsAt = null;
+    if (scheduledAt) {
+      startsAt = calendar.toDate(scheduledAt);
+      if (!startsAt) {
+        return res.status(400).json({ message: "scheduledAt is not a valid date" });
+      }
+    }
+    if (!goLiveNow && !startsAt) {
+      return res
+        .status(400)
+        .json({ message: "scheduledAt is required unless goLiveNow is true" });
+    }
+
     const liveClass = await LiveClass.create({
       title,
       description,
@@ -53,7 +70,8 @@ router.post("/", async (req, res) => {
       instructorName,
       channelName: makeChannelName(),
       status: goLiveNow ? "live" : "scheduled",
-      scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
+      scheduledAt: goLiveNow ? null : startsAt,
+      durationMinutes: calendar.normalizeDuration(durationMinutes),
       startedAt: goLiveNow ? new Date() : null,
       visibility: visibility === "private" ? "private" : "public",
       joinCode: makeJoinCode(),
@@ -90,6 +108,104 @@ router.get("/feed", async (_req, res) => {
   } catch (err) {
     console.error("LIVE FEED ERROR:", err.message);
     res.status(500).json({ message: "Could not load classes" });
+  }
+});
+
+/* -------------------------------------------------------------
+   Calendar: classes inside a date window, bucketed into days of
+   the viewer's timezone. Backs the month grid and the day agenda.
+
+   NOTE: must stay above "/:id" — Express matches in order, and
+   "/calendar" would otherwise be read as a class id.
+
+   query:
+     month=YYYY-MM          | from=<ISO>&to=<ISO>   (default: this month)
+     tzOffset=<minutes east of UTC>                 (330 for IST)
+     instructorId=<id>      only theirs, private ones included
+     viewerId=<id>          flags events as isMine
+     status=scheduled,live  comma list                (default: all)
+     summary=1              per-day counts only, no event bodies
+------------------------------------------------------------- */
+router.get("/calendar", async (req, res) => {
+  try {
+    const { start, end, tzOffsetMinutes } = calendar.parseRange({
+      from: req.query.from,
+      to: req.query.to,
+      month: req.query.month,
+      tzOffset: req.query.tzOffset,
+    });
+
+    const instructorId = String(req.query.instructorId || "").trim();
+    const viewerId = String(req.query.viewerId || instructorId || "").trim();
+
+    const query = {};
+    if (instructorId) {
+      // An instructor looking at their own schedule sees private classes too.
+      query.instructorId = instructorId;
+    } else {
+      // Browsing the platform schedule: public classes only.
+      query.visibility = "public";
+    }
+
+    const statuses = String(req.query.status || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const allowed = ["scheduled", "live", "ended"];
+    const unknown = statuses.filter((s) => !allowed.includes(s));
+    if (unknown.length) {
+      return res
+        .status(400)
+        .json({ message: `unknown status: ${unknown.join(", ")}` });
+    }
+    if (statuses.length) query.status = { $in: statuses };
+
+    // A class can start before the window opens and still run into it, so widen
+    // the fetch by the longest class we allow and trim precisely in JS after.
+    const pad = calendar.MAX_DURATION_MINUTES * calendar.MINUTE_MS;
+    const lower = new Date(start.getTime() - pad);
+    query.$or = [
+      { scheduledAt: { $gte: lower, $lt: end } },
+      { scheduledAt: null, startedAt: { $gte: lower, $lt: end } },
+      {
+        scheduledAt: null,
+        startedAt: null,
+        createdAt: { $gte: lower, $lt: end },
+      },
+    ];
+
+    const classes = await LiveClass.find(query)
+      .select("-questions -raisedHands -participants -ratings -recording")
+      .limit(2000)
+      .lean();
+
+    const built = calendar.buildCalendar(classes, {
+      start,
+      end,
+      tzOffsetMinutes,
+      viewerId,
+    });
+
+    const summary = req.query.summary === "1" || req.query.summary === "true";
+    res.json({
+      range: {
+        from: start.toISOString(),
+        to: end.toISOString(),
+        tzOffset: tzOffsetMinutes,
+      },
+      counts: built.counts,
+      total: built.total,
+      days: summary
+        ? built.days.map((d) => ({ date: d.date, count: d.count }))
+        : built.days,
+      events: summary ? [] : built.events,
+    });
+  } catch (err) {
+    if (err instanceof calendar.CalendarRequestError) {
+      return res.status(400).json({ message: err.message });
+    }
+    console.error("CALENDAR ERROR:", err.message);
+    res.status(500).json({ message: "Could not load calendar" });
   }
 });
 
@@ -229,6 +345,47 @@ router.get("/:id/token", async (req, res) => {
       token,
       tokenConfigured: agora.isTokenConfigured(),
     });
+  } catch (err) {
+    res.status(400).json({ message: "Bad id" });
+  }
+});
+
+/* -------------------------------------------------------------
+   Instructor: move a class to another slot (from the calendar).
+   body: { scheduledAt?, durationMinutes?, instructorId? }
+------------------------------------------------------------- */
+router.patch("/:id/schedule", async (req, res) => {
+  try {
+    const { scheduledAt, durationMinutes, instructorId } = req.body || {};
+
+    const c = await LiveClass.findById(req.params.id);
+    if (!c) return res.status(404).json({ message: "Not found" });
+
+    // Only the owner may move a class.
+    if (instructorId && String(c.instructorId) !== String(instructorId)) {
+      return res.status(403).json({ message: "Not your class" });
+    }
+    if (c.status !== "scheduled") {
+      return res
+        .status(409)
+        .json({ message: `A ${c.status} class cannot be rescheduled` });
+    }
+
+    if (scheduledAt !== undefined) {
+      const when = calendar.toDate(scheduledAt);
+      if (!when) {
+        return res
+          .status(400)
+          .json({ message: "scheduledAt is not a valid date" });
+      }
+      c.scheduledAt = when;
+    }
+    if (durationMinutes !== undefined) {
+      c.durationMinutes = calendar.normalizeDuration(durationMinutes);
+    }
+
+    await c.save();
+    res.json({ liveClass: c });
   } catch (err) {
     res.status(400).json({ message: "Bad id" });
   }

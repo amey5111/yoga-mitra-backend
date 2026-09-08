@@ -53,9 +53,13 @@ const LiveClassSchema = new mongoose.Schema(
       default: [],
     },
 
-    scheduledAt: { type: Date, default: null },
+    scheduledAt: { type: Date, default: null, index: true },
     startedAt: { type: Date, default: null },
     endedAt: { type: Date, default: null },
+
+    // How long the class is expected to run. Drives the end time drawn on the
+    // calendar; a finished class uses its real endedAt instead.
+    durationMinutes: { type: Number, default: 60, min: 5, max: 480 },
 
     // Approved speakers (raised hand + instructor accepted). Their app upgrades
     // its Agora role to broadcaster so their camera/mic go live.
@@ -90,5 +94,10 @@ const LiveClassSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+/* Calendar reads slice by time, so index the fields those queries filter on. */
+LiveClassSchema.index({ instructorId: 1, scheduledAt: 1 });
+LiveClassSchema.index({ visibility: 1, scheduledAt: 1 });
+LiveClassSchema.index({ status: 1, startedAt: 1 });
 
 module.exports = mongoose.model("LiveClass", LiveClassSchema);
