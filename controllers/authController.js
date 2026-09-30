@@ -56,6 +56,9 @@ exports.login = async (req, res) => {
       expiresIn: "7d",
     });
 
+    // Mark them online now (best-effort, never blocks the login response).
+    User.updateOne({ _id: user._id }, { lastSeenAt: new Date() }).catch(() => {});
+
     res.json({
       token,
       userId: user._id,
@@ -64,6 +67,7 @@ exports.login = async (req, res) => {
       ageGroup: user.ageGroup,
       gender: user.gender,
       role: user.role || "user",
+      isAdmin: user.isAdmin || false,
     });
   } catch (err) {
     res.status(500).json({ message: err.message });

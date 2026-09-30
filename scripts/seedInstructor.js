@@ -28,6 +28,7 @@ const NAME = "Yoga Instructor";
         name: NAME,
         password: hashed,
         role: "instructor",
+        isAdmin: true, // recruiter / admin console account
       },
     },
     { upsert: true, new: true, setDefaultsOnInsert: true },

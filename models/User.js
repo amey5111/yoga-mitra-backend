@@ -73,6 +73,13 @@ const userSchema = new mongoose.Schema(
     // "user" (default) or "instructor" — drives a completely separate experience
     role: { type: String, enum: ["user", "instructor"], default: "user" },
 
+    // Admin / recruiter (only the seeded instructor@yogamitra.in). Sees every
+    // instructor and class and can join any class. Normal instructors cannot.
+    isAdmin: { type: Boolean, default: false },
+
+    // Updated on login / heartbeat / go-live; drives the online-status dot.
+    lastSeenAt: Date,
+
     // Instructor public profile
     bio: { type: String, default: "" },
     specialty: { type: String, default: "" },

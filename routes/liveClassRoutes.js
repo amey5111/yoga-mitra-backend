@@ -2,6 +2,7 @@ const express = require("express");
 const LiveClass = require("../models/LiveClass");
 const LiveAttendance = require("../models/LiveAttendance");
 const LessonMaterial = require("../models/LessonMaterial");
+const User = require("../models/User");
 const agora = require("../utils/agoraClient");
 const calendar = require("../services/calendarService");
 
@@ -435,6 +436,13 @@ router.post("/:id/go-live", async (req, res) => {
       new: true,
     });
     if (!c) return res.status(404).json({ message: "Not found" });
+    // Going live means the instructor is definitely online.
+    if (c.instructorId) {
+      User.updateOne(
+        { _id: c.instructorId },
+        { lastSeenAt: new Date() },
+      ).catch(() => {});
+    }
     res.json({ liveClass: c });
   } catch (err) {
     res.status(400).json({ message: "Bad id" });

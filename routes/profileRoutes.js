@@ -38,4 +38,17 @@ router.post("/:userId", async (req, res) => {
   }
 });
 
+/* Presence ping — keeps the online-status dot fresh while the app is open. */
+router.post("/:userId/heartbeat", async (req, res) => {
+  try {
+    await User.updateOne(
+      { _id: req.params.userId },
+      { lastSeenAt: new Date() },
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ message: "Bad id" });
+  }
+});
+
 module.exports = router;
