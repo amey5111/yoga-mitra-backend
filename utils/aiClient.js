@@ -256,14 +256,19 @@ async function callAIRecommendations(userProfile, healthInfo, goals) {
       .sort((a, b) => b.score - a.score)
       .slice(0, 15);
 
+    // Local, deterministic fallback (already condition-safe). Used when there's
+    // no API key AND whenever the AI call fails (e.g. Mistral rate limit / quota),
+    // so the user still gets safe recommendations instead of an empty screen.
+    const fallback = [
+      ...scoredYoga.slice(0, 10).map((p) => ({ id: p.id })),
+      ...scoredBreathing.slice(0, 5).map((b) => ({
+        id: b.id,
+        type: "breathing",
+      })),
+    ];
+
     if (!apiKey) {
-      return [
-        ...scoredYoga.slice(0, 10).map((p) => ({ id: p.id })),
-        ...scoredBreathing.slice(0, 5).map((b) => ({
-          id: b.id,
-          type: "breathing",
-        })),
-      ];
+      return fallback;
     }
 
     const userContext = `
@@ -425,37 +430,45 @@ Available Breathing:
 ${breathingList}
 `;
 
-    const resp = await axios.post(
-      "https://api.mistral.ai/v1/chat/completions",
-      {
-        model,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.1,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
+    try {
+      const resp = await axios.post(
+        "https://api.mistral.ai/v1/chat/completions",
+        {
+          model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.1,
         },
-      },
-    );
+        {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+        },
+      );
 
-    const content = resp.data?.choices?.[0]?.message?.content || "";
-    const match = content.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error("Invalid AI JSON");
+      const content = resp.data?.choices?.[0]?.message?.content || "";
+      const match = content.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error("Invalid AI JSON");
 
-    const aiResult = JSON.parse(cleanJSONString(match[0]));
+      const aiResult = JSON.parse(cleanJSONString(match[0]));
 
-    return [
-      ...safeArray(aiResult.poses)
-        .slice(0, 10)
-        .map((p) => ({ id: p.id, reason: p.reason })),
-      ...safeArray(aiResult.breathing)
-        .slice(0, 5)
-        .map((b) => ({ id: b.id, type: "breathing", reason: b.reason })),
-    ];
+      return [
+        ...safeArray(aiResult.poses)
+          .slice(0, 10)
+          .map((p) => ({ id: p.id, reason: p.reason })),
+        ...safeArray(aiResult.breathing)
+          .slice(0, 5)
+          .map((b) => ({ id: b.id, type: "breathing", reason: b.reason })),
+      ];
+    } catch (aiErr) {
+      // AI unavailable (rate limit / quota / network) — serve the safe,
+      // locally-scored list so the user still gets recommendations.
+      const status = aiErr.response?.status;
+      console.log("AI ERROR (using local fallback):", status || "", aiErr.message);
+      return fallback;
+    }
   } catch (err) {
-    console.log("AI ERROR:", err.message);
+    console.log("RECOMMENDER ERROR:", err.message);
     return [];
   }
 }
