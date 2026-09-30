@@ -33,12 +33,71 @@ function normalizeMedicalConditions(conditions) {
     arthritis: "arthritis",
     asthma: "asthma",
     "leg injury": "leg_injury",
+    pregnancy: "pregnancy",
+    pregnant: "pregnancy",
+    "post-pregnancy": "post_pregnancy",
+    "post pregnancy": "post_pregnancy",
+    postpartum: "post_pregnancy",
+    "back pain": "back_pain",
+    "slip disc": "back_pain",
+    "slipped disc": "back_pain",
+    "heart condition": "heart",
+    heart: "heart",
+    migraine: "migraine",
+    hernia: "hernia",
+    vertigo: "vertigo",
   };
 
   return safeArray(conditions).map((c) => {
     const key = String(c).toLowerCase();
     return map[key] || key;
   });
+}
+
+/* ---------------- SAFETY: condition → unsafe pose keywords ---------------- */
+/* A robust net that works even when a pose doc has no contraindication_tags:
+   any pose whose English or Sanskrit name contains one of these keywords is
+   dropped for that condition (e.g. deep twists/backbends/inversions in
+   pregnancy). Names are matched case-insensitively as substrings. */
+const conditionUnsafeKeywords = {
+  pregnancy: [
+    "boat", "navasana", "plank", "cobra", "bhujang", "bow", "dhanur",
+    "wheel", "chakra", "camel", "ustra", "locust", "shalabh",
+    "twist", "matsyendra", "headstand", "sirsa", "shoulder stand", "sarvang",
+    "peacock", "mayur", "abdomen", "belly", "prone", "supta",
+  ],
+  post_pregnancy: [
+    "boat", "navasana", "wheel", "chakra", "headstand", "sirsa",
+    "shoulder stand", "sarvang", "peacock", "mayur", "full twist",
+  ],
+  high_blood_pressure: [
+    "headstand", "sirsa", "shoulder stand", "sarvang", "handstand",
+    "wheel", "chakra",
+  ],
+  heart: [
+    "headstand", "sirsa", "shoulder stand", "sarvang", "handstand",
+    "wheel", "chakra", "breath retention", "kumbhak",
+  ],
+  hernia: ["boat", "navasana", "plank", "peacock", "mayur", "wheel", "chakra"],
+  back_pain: ["wheel", "chakra", "full forward", "deep twist", "plough", "hala"],
+  vertigo: [
+    "headstand", "sirsa", "shoulder stand", "sarvang", "forward fold",
+    "standing forward",
+  ],
+  migraine: ["headstand", "sirsa", "shoulder stand", "sarvang", "backbend"],
+  glaucoma: ["headstand", "sirsa", "shoulder stand", "sarvang", "inversion"],
+};
+
+/* Is this pose unsafe for any of the user's (normalized) conditions? */
+function isPoseUnsafe(pose, normalizedConditions) {
+  const nameEn = String(pose.name?.en || "").toLowerCase();
+  const nameSan = String(pose.name_sanskrit || "").toLowerCase();
+  const hay = `${nameEn} ${nameSan}`;
+  for (const cond of normalizedConditions) {
+    const kws = conditionUnsafeKeywords[cond] || [];
+    if (kws.some((kw) => hay.includes(kw))) return true;
+  }
+  return false;
 }
 
 /* ---------------- CONDITION → BODY PART MAP ---------------- */
@@ -171,7 +230,15 @@ async function callAIRecommendations(userProfile, healthInfo, goals) {
     const yogaRaw = await YogaPose.find({}).lean();
     const breathingRaw = await BreathingTechnique.find({}).lean();
 
-    const scoredYoga = yogaRaw
+    // Health-condition safety net: drop poses unsafe for the user's conditions
+    // (e.g. inversions/backbends/twists in pregnancy or post-pregnancy) before
+    // scoring, so they can never be recommended.
+    const userConditions = normalizeMedicalConditions(
+      healthInfo.medical_conditions,
+    );
+    const safeYoga = yogaRaw.filter((p) => !isPoseUnsafe(p, userConditions));
+
+    const scoredYoga = safeYoga
       .map((pose) => ({
         ...pose,
         score: calculateScore(pose, healthInfo, goals),
@@ -217,9 +284,22 @@ User Profile:
       .map((b) => `ID ${b.id} - ${b.name?.en}`)
       .join("\n");
 
+    const isPregnancy =
+      userConditions.includes("pregnancy") ||
+      userConditions.includes("post_pregnancy");
+
+    const safetyNote = userConditions.length
+      ? `
+SAFETY (MANDATORY):
+- The user has these conditions: ${userConditions.join(", ")}.
+- The list already excludes poses that are unsafe for them, but still NEVER pick a pose that strains these conditions.
+${isPregnancy ? "- This user is pregnant or recently gave birth. Choose ONLY gentle, restorative, supported poses. No deep twists, backbends, inversions, strong core or prone (belly-down) poses." : ""}
+`
+      : "";
+
     const prompt = `
 You are a certified Indian yoga therapist writing recommendations for real Indian users.
-
+${safetyNote}
 TASK:
 
 1) Select EXACTLY 10 yoga poses.
